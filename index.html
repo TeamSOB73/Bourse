@@ -2578,9 +2578,10 @@
         });
     </script>
 <script type="module">
-  import { initializeApp } from "https://gstatic.com";
-  import { getAuth, signInAnonymously, onAuthStateChanged } from "https://gstatic.com";
-  import { getFirestore, doc, setDoc, onSnapshot } from "https://gstatic.com";
+  const cdn = "https://gstatic.com";
+  const { initializeApp } = await import(cdn + "firebase-app.js");
+  const { getAuth, signInAnonymously, onAuthStateChanged } = await import(cdn + "firebase-auth.js");
+  const { getFirestore, doc, setDoc, onSnapshot } = await import(cdn + "firebase-firestore.js");
 
   const firebaseConfig = {
     apiKey: "AIzaSyCxqHoV-OrlVeB5s024kfzcHJPr4VTdGQs",
@@ -2613,10 +2614,8 @@
         appState.articles = Array.isArray(data.articles) ? data.articles : [];
         appState.sales = Array.isArray(data.sales) ? data.sales : [];
 
-        // Sauvegarde locale de secours sans renvoyer vers Firebase
         saveAppData(true, true);
 
-        // Rafraîchir uniquement l'écran en cours d'utilisation
         if (appState.activeTab === 'deposant') renderDeposantSpace();
         if (appState.activeTab === 'depots') renderDepotPosteWorkspace();
         if (appState.activeTab === 'ventes') {
@@ -2634,9 +2633,10 @@
       await setDoc(sessionRef, nouvellesDonnees, { merge: true });
     } catch (error) {
       console.error("Erreur sauvegarde Firebase :", error);
-      showToast("Erreur de synchronisation Cloud (vérifiez internet)", "error");
+      showToast("Erreur de synchronisation Cloud", "error");
     }
   };
 </script>
+
 </body>
 </html>
