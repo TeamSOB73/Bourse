@@ -2581,7 +2581,7 @@
   const cdn = "https://www.gstatic.com/firebasejs/10.8.0/";
   const { initializeApp } = await import(cdn + "firebase-app.js");
   const { getAuth, signInAnonymously, onAuthStateChanged } = await import(cdn + "firebase-auth.js");
-  const { getFirestore, doc, setDoc, onSnapshot } = await import(cdn + "firebase-firestore.js");
+  const { getFirestore, doc, runTransaction, onSnapshot } = await import(cdn + "firebase-firestore.js");
 
   const firebaseConfig = {
     apiKey: "AIzaSyCxqHoV-OrlVeB5s024kfzcHJPr4VTdGQs",
@@ -2598,6 +2598,9 @@
   const db = getFirestore(app);
   const sessionRef = doc(db, "bourse_2027", "session_principale");
 
+  // Variable pour détecter une remise à zéro volontaire (bouton "Vierge")
+  let derniereReinitialisation = null;
+
   onAuthStateChanged(auth, (user) => {
     if (user) {
       ecouterDonneesEnDirect();
@@ -2610,6 +2613,8 @@
     onSnapshot(sessionRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
+        derniereReinitialisation = data.resetAt || null;
+
         appState.deposants = Array.isArray(data.deposants) ? data.deposants : [];
         appState.articles = Array.isArray(data.articles) ? data.articles : [];
         appState.sales = Array.isArray(data.sales) ? data.sales : [];
@@ -2627,16 +2632,69 @@
     });
   }
 
+  // Fonction utilitaire de fusion intelligente par ID unique
+  function fusionnerListes(listeServeur = [], listeLocale = []) {
+    const map = new Map();
+    // 1. On garde tout ce qui est déjà sur le serveur
+    listeServeur.forEach(item => {
+      if (item && item.id) map.set(item.id, item);
+    });
+    // 2. On ajoute ou met à jour avec les modifications locales
+    listeLocale.forEach(item => {
+      if (item && item.id) {
+        const existant = map.get(item.id);
+        // Si un article est déjà marqué vendu sur le serveur, on protège son statut
+        if (existant && existant.status === 'vendu' && item.status !== 'vendu') {
+          map.set(item.id, existant);
+        } else {
+          map.set(item.id, item);
+        }
+      }
+    });
+    return Array.from(map.values());
+  }
+
+  // Sauvegarde transactionnelle anti-écrasement
   window.sauvegarderDansLeCloud = async function(nouvellesDonnees) {
     if (!auth.currentUser) return;
+
+    // Cas particulier : si l'administrateur a vidé la session (bouton "Vierge")
+    const estSessionVierge = 
+      nouvellesDonnees.deposants.length === 0 && 
+      nouvellesDonnees.articles.length === 0 && 
+      nouvellesDonnees.sales.length === 0;
+
     try {
-      await setDoc(sessionRef, nouvellesDonnees, { merge: true });
+      await runTransaction(db, async (transaction) => {
+        const sfDoc = await transaction.get(sessionRef);
+
+        if (!sfDoc.exists() || estSessionVierge) {
+          transaction.set(sessionRef, {
+            ...nouvellesDonnees,
+            resetAt: estSessionVierge ? new Date().toISOString() : null
+          });
+          return;
+        }
+
+        const dataServeur = sfDoc.data();
+
+        // Fusion sécurisée des 3 listes
+        const deposantsFusionnes = fusionnerListes(dataServeur.deposants, nouvellesDonnees.deposants);
+        const articlesFusionnes = fusionnerListes(dataServeur.articles, nouvellesDonnees.articles);
+        const salesFusionnees = fusionnerListes(dataServeur.sales, nouvellesDonnees.sales);
+
+        transaction.update(sessionRef, {
+          deposants: deposantsFusionnes,
+          articles: articlesFusionnes,
+          sales: salesFusionnees,
+          updatedAt: new Date().toISOString()
+        });
+      });
     } catch (error) {
-      console.error("Erreur sauvegarde Firebase :", error);
-      showToast("Erreur de synchronisation Cloud", "error");
+      console.error("Erreur transaction Firebase :", error);
+      showToast("Conflit réseau, nouvelle tentative en cours...", "warning");
     }
   };
 </script>
-
 </body>
 </html>
